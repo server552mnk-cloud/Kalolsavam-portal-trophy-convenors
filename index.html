@@ -455,8 +455,8 @@
       const CFG_URL_KEY = 'kalolsavam_sb_url';
       const CFG_ANON_KEY = 'kalolsavam_sb_key';
 
-      const ADMIN_PASSWORD = 'KATF@vengara';
       let isAdminAuthenticated = false;
+      let adminPassword = '';
       let sb = null;
       let conveners = [];
       let currentPhotoData = '';
@@ -631,25 +631,8 @@
         try { localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(list)); } catch (e) {}
       }
 
-      async function fetchConveners() {
-        if (!sb) {
-          conveners = readLocal();
-          updateNavCount();
-          if (!viewDirectory.classList.contains('hidden')) renderDirectory();
-          return;
-        }
-        const { data, error } = await sb
-          .from('conveners')
-          .select('*')
-          .order('created_at', { ascending: false });
-        if (error) {
-          showToast('Supabase ടേബിൾ ലഭ്യമല്ല (schema.sql റൺ ചെയ്തിട്ടുണ്ടെന്ന് ഉറപ്പാക്കുക).', true);
-          conveners = readLocal();
-          updateNavCount();
-          if (!viewDirectory.classList.contains('hidden')) renderDirectory();
-          return;
-        }
-        conveners = (data || []).map(row => ({
+      function mapRows(rows) {
+        return (rows || []).map(row => ({
           id: row.id,
           name: row.name,
           designation: row.designation,
@@ -659,6 +642,28 @@
           photo: row.photo || '',
           trophyIssued: !!row.trophy_issued
         }));
+      }
+
+      async function fetchConveners() {
+        if (!sb) {
+          conveners = readLocal();
+          updateNavCount();
+          if (!viewDirectory.classList.contains('hidden')) renderDirectory();
+          return;
+        }
+        if (!isAdminAuthenticated) {
+          conveners = [];
+          updateNavCount();
+          return;
+        }
+        const { data, error } = await sb.rpc('admin_get_conveners', { p_password: adminPassword });
+        if (error) {
+          conveners = [];
+          updateNavCount();
+          if (!viewDirectory.classList.contains('hidden')) renderDirectory();
+          return;
+        }
+        conveners = mapRows(data);
         updateNavCount();
         if (!viewDirectory.classList.contains('hidden')) renderDirectory();
       }
@@ -692,21 +697,41 @@
         adminLoginModal.classList.add('hidden');
       });
 
-      adminLoginForm.addEventListener('submit', (e) => {
+      adminLoginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (adminPasswordInput.value === ADMIN_PASSWORD) {
-          isAdminAuthenticated = true;
-          adminLoginModal.classList.add('hidden');
-          updateNavCount();
-          switchTab('directory');
-          showToast('അഡ്മിൻ ഡാഷ്‌ബോർഡിലേക്ക് സ്വാഗതം!');
-        } else {
-          errAdminPassword.classList.remove('hidden');
+        const pwd = adminPasswordInput.value;
+        if (!pwd) return;
+        if (!sb) {
+          if (pwd === 'KATF@vengara') {
+            isAdminAuthenticated = true;
+            adminLoginModal.classList.add('hidden');
+            updateNavCount();
+            switchTab('directory');
+            showToast('അഡ്മിൻ ഡാഷ്‌ബോർഡിലേക്ക് സ്വാഗതം!');
+          } else {
+            errAdminPassword.classList.remove('hidden');
+          }
+          return;
         }
+        errAdminPassword.classList.add('hidden');
+        const { data, error } = await sb.rpc('admin_get_conveners', { p_password: pwd });
+        if (error) {
+          errAdminPassword.classList.remove('hidden');
+          return;
+        }
+        adminPassword = pwd;
+        isAdminAuthenticated = true;
+        conveners = mapRows(data);
+        adminLoginModal.classList.add('hidden');
+        updateNavCount();
+        switchTab('directory');
+        showToast('അഡ്മിൻ ഡാഷ്‌ബോർഡിലേക്ക് സ്വാഗതം!');
       });
 
       adminLogoutBtn.addEventListener('click', () => {
         isAdminAuthenticated = false;
+        adminPassword = '';
+        conveners = [];
         updateNavCount();
         switchTab('register');
         showToast('ഡാഷ്‌ബോർഡ് ലോക്ക് ചെയ്തു.');
@@ -856,9 +881,16 @@
             }
             writeLocal(conveners);
           } else if (editId) {
-            const updateObj = { name, designation, school, committee, mobile };
-            if (currentPhotoData) updateObj.photo = currentPhotoData;
-            const { error } = await sb.from('conveners').update(updateObj).eq('id', editId);
+            const { error } = await sb.rpc('admin_update_convener', {
+              p_password: adminPassword,
+              p_id: editId,
+              p_name: name,
+              p_designation: designation,
+              p_school: school,
+              p_committee: committee,
+              p_mobile: mobile,
+              p_photo: currentPhotoData || null
+            });
             if (error) throw error;
           } else {
             const { error } = await sb.from('conveners').insert([{ name, designation, school, committee, mobile, photo: currentPhotoData, trophy_issued: false }]);
@@ -1013,7 +1045,16 @@
               item.trophyIssued = nextState;
               writeLocal(conveners);
             } else {
-              const { error } = await sb.from('conveners').update({ trophy_issued: nextState }).eq('id', id);
+              const { error } = await sb.rpc('admin_update_convener', {
+                p_password: adminPassword,
+                p_id: id,
+                p_name: item.name,
+                p_designation: item.designation,
+                p_school: item.school,
+                p_committee: item.committee,
+                p_mobile: item.mobile,
+                p_trophy_issued: nextState
+              });
               if (error) throw error;
             }
             await fetchConveners();
@@ -1071,7 +1112,7 @@
               conveners = conveners.filter(c => c.id !== pendingDeleteId);
               writeLocal(conveners);
             } else {
-              const { error } = await sb.from('conveners').delete().eq('id', pendingDeleteId);
+              const { error } = await sb.rpc('admin_delete_convener', { p_password: adminPassword, p_id: pendingDeleteId });
               if (error) throw error;
             }
             await fetchConveners();
