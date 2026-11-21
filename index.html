@@ -452,6 +452,8 @@
       const DEFAULT_SUPABASE_ANON_KEY = 'sb_publishable_eJrgT12XIa7GPYxWr6lHIg_yQUWcd5v';
 
       const LOCAL_STORAGE_KEY = 'kalolsavam_conveners_v1';
+      // One-time cleanup: erase any registrant list cached by older versions.
+      try { localStorage.removeItem(LOCAL_STORAGE_KEY); } catch (e) {}
       const CFG_URL_KEY = 'kalolsavam_sb_url';
       const CFG_ANON_KEY = 'kalolsavam_sb_key';
 
@@ -879,7 +881,6 @@
             } else {
               conveners.unshift({ id: 'loc-' + Date.now(), name, designation, school, committee, mobile, photo: currentPhotoData, trophyIssued: false });
             }
-            writeLocal(conveners);
           } else if (editId) {
             const { error } = await sb.rpc('admin_update_convener', {
               p_password: adminPassword,
@@ -1043,7 +1044,6 @@
           try {
             if (!sb) {
               item.trophyIssued = nextState;
-              writeLocal(conveners);
             } else {
               const { error } = await sb.rpc('admin_update_convener', {
                 p_password: adminPassword,
@@ -1110,7 +1110,6 @@
           try {
             if (!sb) {
               conveners = conveners.filter(c => c.id !== pendingDeleteId);
-              writeLocal(conveners);
             } else {
               const { error } = await sb.rpc('admin_delete_convener', { p_password: adminPassword, p_id: pendingDeleteId });
               if (error) throw error;
